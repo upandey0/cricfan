@@ -1,8 +1,28 @@
-const router = require('express').Router()
-const {requestOTPController,verifyOTPController,resendOTPController} = require('../controllers/SignupController')
+const router = require('express').Router();
+const SignupController = require('../controllers/SignupController');
+const validators = require('../middlwares/validators');
+const { validateSessionInReq } = require('../middlwares/sessionValidation');
 
-router.post('/request-otp',requestOTPController)
-router.post('/verify-otp', verifyOTPController)
-router.post('/resend-otp', resendOTPController)
+router.post(
+  '/request-otp',
+  validators.validateRequestBodyForRequestOTP,
+  SignupController.requestOTP
+);
+router.post(
+  '/verify-otp',
+  validators.validateRequestBodyForVerifyOTP,
+  SignupController.verifyOTP
+);
+router.post(
+  '/resend-otp',
+  validators.validateRequestBodyForRequestOTP,
+  SignupController.resendOTP
+);
 
-module.exports = router
+router.post(  
+  '/logout', validateSessionInReq,
+  SignupController.logout
+);
+
+
+module.exports = router;
