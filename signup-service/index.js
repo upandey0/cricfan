@@ -9,13 +9,6 @@ const app = express()
 
 app.use(express.json())
 
-const pool = new Pool({
-    user: secrets.PGUSER,
-    password: secrets.PASSWORD,
-    host: secrets.PGHOST,
-    port: secrets.PGPORT,
-    database: secrets.PGDATABASE
-})
 
 //console.log(pool)
 

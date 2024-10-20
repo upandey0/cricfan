@@ -1,38 +1,29 @@
-'use strict'
-const {DataTypes} = require('sequelize')
-
-const sequelize = require('../config/config.json')
-
-const User = sequelize.define('User', {
-    id : {
-        type: DataTypes.INTEGER,
-        autoIncrement : true,
-        allowNull: false,
-        unique: true
-    }, 
-    email: {
-        type: DataTypes.STRING,
-        allowNull: false,
-        unique: true
-    }, 
-    password: {
-        type: DataTypes.STRING,
-        allowNull: false
+'use strict';
+module.exports = (sequelize, DataTypes) => {
+  const User = sequelize.define('User', {
+    id: {
+      type: DataTypes.INTEGER,
+      autoIncrement: true,
+      allowNull: false,
+      unique: true,
+      primaryKey: true
     },
-    createdAt: {
-        type: Sequelize.DATE,
-        allowNull: false,
-        defaultValue: Sequelize.literal('CURRENT_TIMESTAMP'),
-    },
-    updatedAt: {
-        type: Sequelize.DATE,
-        allowNull: false,
-        defaultValue: Sequelize.literal('CURRENT_TIMESTAMP'),
+    phone: {
+      type: DataTypes.STRING(15), // Changed to STRING to handle phone numbers properly
+      unique: true,
+      allowNull: false,
+      validate: {
+        isValidPhone(value) {
+          // Basic validation for phone numbers
+          if (!/^\+?[1-9]\d{1,14}$/.test(value)) {
+            throw new Error('Invalid phone number format');
+          }
+        }
+      }
     }
-},
-{
+  }, {
     tableName: 'users',
-    timestamps : true
-})
-
-module.exports = User
+    timestamps: true
+  });
+  return User;
+};
