@@ -1,0 +1,7 @@
+{
+    "PGUSER" : "postgres",
+    "PGPASSWORD" : "802128",
+    "PGHOST" : "localhost",
+    "PGDATABASE" : "cricfan",
+    "PGPORT" : 5432
+}
