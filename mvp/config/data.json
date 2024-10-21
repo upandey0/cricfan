@@ -1,0 +1,10 @@
+{
+    "API_KEY"  : "b9df1426-7e85-4669-8714-175d7119a4e9",
+    "VERSION" : "V1",
+    "BASE_URL"  : "https://api.cricapi.com",
+    "PGUSER" : "postgres",
+    "PGPASSWORD" : "802128",
+    "PGPORT" : 5432,
+    "PGDATABASE"  : "cricfan",
+    "PGHOST" : "localhost"
+}
