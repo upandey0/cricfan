@@ -5,12 +5,20 @@ const { User } = require('../models');
 const secrets = require('../configs/config.json');
 const { formatPhoneNumber, createSession, logger } = require('../utils/helper');
 const BaseResponse = require('../objects/response/BaseResponse');
-const {SUCCESS ,FAILURE} = require("../common/constant");
-const {logoutSession} = require("../redis/redis.service");
-const INFOBIP_API_KEY =
-  'f0381b017497ae810cd93fa0f480d99c-fcd337fd-164f-4430-a580-2fa190da0226';
+const { SUCCESS, FAILURE } = require("../common/constant");
+const { logoutSession } = require("../redis/redis.service");
+const UserReferralService = require('../services/UserReferralService');
+const { redis } = require('../config');
+const ReferralCodeGenerator = require('../utils/referralCodeGenerator');
+const HttpException = require('../common/http-exception');
+const ReferralCodeService = require('../services/ReferralCodeService');
+const UserService = require('../services/UserService');
+
+const INFOBIP_API_KEY = 'f0381b017497ae810cd93fa0f480d99c-fcd337fd-164f-4430-a580-2fa190da0226';
 const INFOBIP_BASE_URL = 'https://qdwg5m.api.infobip.com';
 const INFOBIP_SENDER = '447491163443';
+const REFERRAL_TTL = 120; // TTL in seconds
+const SESSION_ID_TTL = 180 * 24 * 60; // TTL in minutes
 
 class BaseController {
   static handleError(res, error, message = 'An error occurred') {
@@ -25,9 +33,18 @@ class BaseController {
 
 // Extend the base controller for specific controllers
 class SignupController extends BaseController {
+  // Main Controller Methods
   static async requestOTP(req, res) {
     try {
-      let { phone, isEligible } = req.body;
+      let { phone, isEligible, referralCode } = req.body;
+
+      if (!isEligible) {
+        return res.status(403).json({
+          success: false,
+          message: 'User is not eligible to register',
+        });
+      }
+
       phone = formatPhoneNumber(phone);
 
       if (!phone) {
@@ -37,13 +54,17 @@ class SignupController extends BaseController {
         });
       }
 
-      const existingUser = await User.findOne({ where: { phone } });
+      let isReferralCodeValid = false;
+      if (referralCode) {
+        isReferralCodeValid = await SignupController.isReferralCodeValid(referralCode);
+        if (!isReferralCodeValid) {
+          throw new HttpException(400, 'INVALID_REFERRAL_CODE', 'Invalid or expired referral code');
+        }
+      }
 
-      if (!existingUser && !isEligible) {
-        return res.status(403).json({
-          success: false,
-          message: 'User is not eligible to register',
-        });
+      // Save ref_code to REDIS
+      if (isReferralCodeValid) {
+        SignupController.saveRefCodeInRedis(referralCode, phone);
       }
 
       // const messageBody = {
@@ -70,13 +91,9 @@ class SignupController extends BaseController {
       // req.session.pinId = response.data.pinId;
       // req.session.phone = phone;
       // req.session.isNewUser = !existingUser;
+
       const response = new BaseResponse(SUCCESS, {});
       return res.status(200).json(response);
-      // return res.status(200).json({
-      //   success: true,
-      //   message: 'OTP sent successfully',
-      //   isNewUser: !existingUser,
-      // });
     } catch (error) {
       return SignupController.handleError(res, error, 'Failed to send OTP');
     }
@@ -110,12 +127,12 @@ class SignupController extends BaseController {
       //         message: 'Invalid OTP'
       //     });
       // }
-      const existingUser = await User.findOne({ where: { phone } });
-      const isNewUser = !existingUser;
 
-      const user = await SignupController.findOrCreateUser(phone, existingUser);
-      const SESSION_ID_TTL = 180*24*60;
+      const user = await UserService.findOrCreateUser(phone);
+      await SignupController.addReferralMapping(phone);
+
       const sessionId = await createSession(user, SESSION_ID_TTL);
+
       // if (req.session) {
       //   this.clearSession(req.session);
       // }
@@ -124,7 +141,7 @@ class SignupController extends BaseController {
         user: {
           id: user.id,
           phone: user.phone,
-          isNewUser,
+          referralCode: user.referral_code,
         },
       });
 
@@ -142,73 +159,6 @@ class SignupController extends BaseController {
     } catch (error) {
       return SignupController.handleError(res, error, 'Authentication failed');
     }
-  }
-
-  static async verifyOTPWithInfobip(otp, pinId) {
-    return axios({
-      method: 'post',
-      url: `${INFOBIP_BASE_URL}/2fa/2/pin/verify`,
-      headers: {
-        Authorization: `App ${INFOBIP_API_KEY}`,
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      data: {
-        pin: otp,
-        pinId: pinId,
-      },
-    });
-  }
-  static async logout(req, res) {
-    try {
-      const sessionId = String(req.headers['session-id']);
-      logger.info("Session Id : ", sessionId);
-      const isLoggedOut = await logoutSession(sessionId);
-      logger.info("Session logged out : ", isLoggedOut);
-
-      if (isLoggedOut) {
-        logger.info("Session logged out successfully for sessionId : ", sessionId);
-        res.status(200).send(new BaseResponse(SUCCESS));
-      } else {
-        logger.error("Failed to logout session for sessionId : ", sessionId);
-        res.status(401).send(new BaseResponse(FAILURE));
-      }
-    } catch (error) {
-      logger.error("Error while logging out session : ", error);
-      res.status(500).send(error);
-    }
-  }
-
-  static async findOrCreateUser(phone, existingUser) {
-    let user;
-
-    if (!existingUser) {
-      user = await User.create({
-        phone,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-    } else {
-      user = await User.findOne({ where: { phone } });
-      user.updatedAt = new Date();
-      await user.save();
-    }
-
-    return user;
-  }
-
-  static generateJWT(user) {
-    return jwt.sign(
-      { userId: user.id, phone: user.phone },
-      secrets.JWT_SECRET,
-      { expiresIn: '24h' }
-    );
-  }
-
-  static clearSession(session) {
-    delete session.pinId;
-    delete session.phone;
-    delete session.isNewUser;
   }
 
   static async resendOTP(req, res) {
@@ -253,6 +203,118 @@ class SignupController extends BaseController {
     }
   }
 
+  static async logout(req, res) {
+    try {
+      const sessionId = String(req.headers['session-id']);
+      logger.info("Session Id: ", sessionId);
+      const isLoggedOut = await logoutSession(sessionId);
+      logger.info("Session logged out: ", isLoggedOut);
+
+      if (isLoggedOut) {
+        logger.info("Session logged out successfully for sessionId: ", sessionId);
+        res.status(200).send(new BaseResponse(SUCCESS));
+      } else {
+        logger.error("Failed to logout session for sessionId: ", sessionId);
+        res.status(401).send(new BaseResponse(FAILURE));
+      }
+    } catch (error) {
+      logger.error("Error while logging out session: ", error);
+      res.status(500).send(error);
+    }
+  }
+
+  // Helper Methods
+  static async addReferralMapping(phoneNumber) {
+    const referralKey = `REFERRAL_${phoneNumber}`;
+    const referralCode = await redis.get(referralKey);
+
+    if (!referralCode) return;
+
+    const referrerUser = await UserService.getUserByReferralCode(referralCode);
+    const registeredUser = await UserService.getUserByPhone(phoneNumber);
+
+    if (referrerUser && registeredUser) {
+      await UserReferralService.createUserReferral({
+        referrerUserId: referrerUser.id,
+        registeredUserId: registeredUser.id,
+        registeredUserPhoneNumber: phoneNumber,
+        referrerUserCode: referralCode,
+      });
+    }
+  }
+
+  static async isReferralCodeValid(referralCode) {
+    try {
+      const referralCodeRecord = await ReferralCodeService.getReferralCode(referralCode);
+
+      if (!referralCodeRecord) {
+        logger.info("Referral code not found");
+        return false;
+      }
+      logger.info("Referral code record: ", referralCodeRecord);
+
+      if (referralCodeRecord.reached_limit) {
+        logger.info("Referral code has reached its limit");
+        return false;
+      }
+      logger.info("Incrementing times_used field");
+
+      await ReferralCodeService.updateReferralCodeUsage(referralCode);
+
+      return true;
+    } catch (error) {
+      logger.error("Error while validating referral code: ", error);
+      return false;
+    }
+  }
+
+  static async saveRefCodeInRedis(referralCode, phoneNumber) {
+    if (!referralCode || !phoneNumber) {
+      throw new Error('Referral code and phone number are required');
+    }
+    const key = `REFERRAL_${phoneNumber}`;
+
+    return new Promise((resolve, reject) => {
+      redis.setex(key, REFERRAL_TTL, referralCode, (err, reply) => {
+        if (err) {
+          logger.error("Error saving referral code in Redis: ", err);
+          return reject(err);
+        }
+        logger.info(`Referral code saved in Redis with key ${key}`);
+        resolve(reply);
+      });
+    });
+  }
+
+  static async verifyOTPWithInfobip(otp, pinId) {
+    return axios({
+      method: 'post',
+      url: `${INFOBIP_BASE_URL}/2fa/2/pin/verify`,
+      headers: {
+        Authorization: `App ${INFOBIP_API_KEY}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      data: {
+        pin: otp,
+        pinId: pinId,
+      },
+    });
+  }
+
+  static generateJWT(user) {
+    return jwt.sign(
+      { userId: user.id, phone: user.phone },
+      secrets.JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+  }
+
+  static clearSession(session) {
+    delete session.pinId;
+    delete session.phone;
+    delete session.isNewUser;
+  }
 }
 
 module.exports = SignupController;
