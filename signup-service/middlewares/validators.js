@@ -2,6 +2,7 @@
 const { check, validationResult } = require('express-validator');
 
 const validateRequestBodyForRequestOTP = [
+  check('referralCode').isLength({ min: 7, max: 7 }).withMessage('Invalid referral code'),
   check('phone').isMobilePhone().withMessage('Invalid phone number'),
   (req, res, next) => {
     const errors = validationResult(req);

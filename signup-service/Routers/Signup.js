@@ -1,7 +1,7 @@
 const router = require('express').Router();
 const SignupController = require('../controllers/SignupController');
-const validators = require('../middlwares/validators');
-const { validateSessionInReq } = require('../middlwares/sessionValidation');
+const validators = require('../middlewares/validators');
+const { validateSessionInReq } = require('../middlewares/sessionValidation');
 
 router.post(
   '/request-otp',

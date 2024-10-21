@@ -13,6 +13,8 @@ const ReferralCodeGenerator = require('../utils/referralCodeGenerator');
 const HttpException = require('../common/http-exception');
 const ReferralCodeService = require('../services/ReferralCodeService');
 const UserService = require('../services/UserService');
+const ERROR_CODES = require('../common/errorCodes');
+const { HttpStatusCode } = require('axios');
 
 const INFOBIP_API_KEY = 'f0381b017497ae810cd93fa0f480d99c-fcd337fd-164f-4430-a580-2fa190da0226';
 const INFOBIP_BASE_URL = 'https://qdwg5m.api.infobip.com';
@@ -21,11 +23,11 @@ const REFERRAL_TTL = 120; // TTL in seconds
 const SESSION_ID_TTL = 180 * 24 * 60; // TTL in minutes
 
 class BaseController {
-  static handleError(res, error, message = 'An error occurred') {
-    console.error(message, error);
-    return res.status(500).json({
+  static handleError(res, error, errorCode) {
+    logger.error(errorCode.message, error);
+    return res.status(errorCode.code).json({
       success: false,
-      message,
+      message: errorCode.message,
       error: error.message || error,
     });
   }
@@ -39,26 +41,20 @@ class SignupController extends BaseController {
       let { phone, isEligible, referralCode } = req.body;
 
       if (!isEligible) {
-        return res.status(403).json({
-          success: false,
-          message: 'User is not eligible to register',
-        });
+        return SignupController.handleError(res, new Error(), ERROR_CODES.USER_NOT_ELIGIBLE);
       }
 
       phone = formatPhoneNumber(phone);
 
       if (!phone) {
-        return res.status(400).json({
-          success: false,
-          message: 'Phone number is required',
-        });
+        return SignupController.handleError(res, new Error(), ERROR_CODES.INVALID_PHONE_NUMBER);
       }
 
       let isReferralCodeValid = false;
       if (referralCode) {
         isReferralCodeValid = await SignupController.isReferralCodeValid(referralCode);
         if (!isReferralCodeValid) {
-          throw new HttpException(400, 'INVALID_REFERRAL_CODE', 'Invalid or expired referral code');
+          throw new HttpException(ERROR_CODES.INVALID_REFERRAL_CODE.code, 'INVALID_REFERRAL_CODE', ERROR_CODES.INVALID_REFERRAL_CODE.message);
         }
       }
 
@@ -93,9 +89,10 @@ class SignupController extends BaseController {
       // req.session.isNewUser = !existingUser;
 
       const response = new BaseResponse(SUCCESS, {});
-      return res.status(200).json(response);
+      logger.info('OTP request successful for phone:', phone);
+      return res.status(HttpStatusCode.Ok).json(response);
     } catch (error) {
-      return SignupController.handleError(res, error, 'Failed to send OTP');
+      return SignupController.handleError(res, error, ERROR_CODES.FAILED_TO_SEND_OTP);
     }
   }
 
@@ -105,27 +102,18 @@ class SignupController extends BaseController {
       // const { pinId, phone, isNewUser } = req.session || {};
 
       // if (!pinId || !phone) {
-      //     return res.status(400).json({
-      //         success: false,
-      //         message: 'Invalid session. Please request OTP again'
-      //     });
+      //     return SignupController.handleError(res, new Error(), ERROR_CODES.INVALID_SESSION);
       // }
 
       // Check if phone number is valid
       if (!phone) {
-        return res.status(400).json({
-          success: false,
-          message: 'Phone number is required',
-        });
+        return SignupController.handleError(res, new Error(), ERROR_CODES.INVALID_PHONE_NUMBER);
       }
 
       // const verificationResponse = await this.verifyOTPWithInfobip(otp, pinId);
 
       // if (!verificationResponse.data.verified) {
-      //     return res.status(400).json({
-      //         success: false,
-      //         message: 'Invalid OTP'
-      //     });
+      //     return SignupController.handleError(res, new Error(), ERROR_CODES.INVALID_OTP);
       // }
 
       const user = await UserService.findOrCreateUser(phone);
@@ -145,19 +133,10 @@ class SignupController extends BaseController {
         },
       });
 
-      return res.status(200).json(response);
-      // return res.status(200).json({
-      //   success: true,
-      //   message: 'Authentication successful',
-      //   sessionId,
-      //   user: {
-      //     id: user.id,
-      //     phone: user.phone,
-      //     isNewUser,
-      //   },
-      // });
+      logger.info('OTP verification successful for phone:', phone);
+      return res.status(HttpStatusCode.Ok).json(response);
     } catch (error) {
-      return SignupController.handleError(res, error, 'Authentication failed');
+      return SignupController.handleError(res, error, ERROR_CODES.AUTHENTICATION_FAILED);
     }
   }
 
@@ -166,10 +145,7 @@ class SignupController extends BaseController {
       const { phone } = req.session;
 
       if (!phone) {
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid session. Please start new authentication',
-        });
+        return SignupController.handleError(res, new Error(), ERROR_CODES.INVALID_SESSION);
       }
 
       const response = await axios({
@@ -194,12 +170,13 @@ class SignupController extends BaseController {
 
       req.session.pinId = response.data.pinId;
 
-      return res.status(200).json({
+      logger.info('OTP resent successfully for phone:', phone);
+      return res.status(HttpStatusCode.Ok).json({
         success: true,
         message: 'OTP resent successfully',
       });
     } catch (error) {
-      return SignupController.handleError(res, error, 'Failed to resend OTP');
+      return SignupController.handleError(res, error, ERROR_CODES.FAILED_TO_RESEND_OTP);
     }
   }
 
@@ -212,14 +189,14 @@ class SignupController extends BaseController {
 
       if (isLoggedOut) {
         logger.info("Session logged out successfully for sessionId: ", sessionId);
-        res.status(200).send(new BaseResponse(SUCCESS));
+        res.status(HttpStatusCode.Ok).send(new BaseResponse(SUCCESS));
       } else {
         logger.error("Failed to logout session for sessionId: ", sessionId);
-        res.status(401).send(new BaseResponse(FAILURE));
+        res.status(HttpStatusCode.Unauthorized).send(new BaseResponse(FAILURE));
       }
     } catch (error) {
       logger.error("Error while logging out session: ", error);
-      res.status(500).send(error);
+      res.status(HttpStatusCode.InternalServerError).send(error);
     }
   }
 
