@@ -2,12 +2,11 @@
 
 module.exports = {
     up: async (queryInterface, Sequelize) => {
-        await queryInterface.createTable('UpcomingMatches', {
+        await queryInterface.createTable('matches', {
             id: {
                 type: Sequelize.UUID,
                 allowNull: false,
-                primaryKey: true,
-                defaultValue: Sequelize.UUIDV4
+                primaryKey: true
             },
             name: {
                 type: Sequelize.STRING,
@@ -19,7 +18,7 @@ module.exports = {
             },
             status: {
                 type: Sequelize.STRING,
-                allowNull: false
+                allowNull: true
             },
             venue: {
                 type: Sequelize.STRING,
@@ -31,10 +30,6 @@ module.exports = {
             },
             dateTimeGMT: {
                 type: Sequelize.DATE,
-                allowNull: false
-            },
-            teams: {
-                type: Sequelize.JSON,
                 allowNull: false
             },
             series_id: {
@@ -61,20 +56,14 @@ module.exports = {
                 type: Sequelize.BOOLEAN,
                 allowNull: false
             },
-            createdAt: {
-                allowNull: false,
-                type: Sequelize.DATE,
-                defaultValue: Sequelize.fn('NOW')
-            },
-            updatedAt: {
-                allowNull: false,
-                type: Sequelize.DATE,
-                defaultValue: Sequelize.fn('NOW')
+            matchStatus: {
+                type: Sequelize.STRING,
+                allowNull: true
             }
         });
     },
 
     down: async (queryInterface, Sequelize) => {
-        await queryInterface.dropTable('UpcomingMatches');
+        await queryInterface.dropTable('matches');
     }
 };
