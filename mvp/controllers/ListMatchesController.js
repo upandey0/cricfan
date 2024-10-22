@@ -1,5 +1,5 @@
 const secrets = require('../config/data.json');
-const { PastMatch, TeamInfo, Score } = require('../models');  
+const { PastMatch, TeamInfo, Score, UpcomingMatch } = require('../models');  
 
 const ListmatchesController = async (req, res) => {
     try {
@@ -36,6 +36,7 @@ const ListmatchesController = async (req, res) => {
         const pastMatches = [];
         const upcomingMatches = [];
 
+        // Categorize matches into live, past, and upcoming
         for (const data of toSendData) {
             if (data.matchStarted && !data.matchEnded) {
                 liveMatches.push(data);
@@ -48,10 +49,9 @@ const ListmatchesController = async (req, res) => {
 
         // Insert past matches into the database
         for (const pastMatch of pastMatches) {
-            // Check if match already exists in the database
+            // Check if the match already exists in the database
             const existingMatch = await PastMatch.findOne({ where: { id: pastMatch.id } });
 
-            // Skip insertion if match already exists
             if (existingMatch) {
                 console.log(`Match with ID ${pastMatch.id} already exists, skipping insertion.`);
                 continue;
@@ -75,41 +75,91 @@ const ListmatchesController = async (req, res) => {
             };
 
             // Insert match data into 'PastMatch' table
-            const match = await PastMatch.create(matchData);
+            const [match, created] = await PastMatch.upsert(matchData);
 
-            console.log('Insertion till Here is Done and Then Exception Will be raise')
+            // Ensure the match is inserted before inserting related data
+            if (!match.id) {
+                console.error("Match ID not found, skipping team info and score insertion.");
+                continue;
+            }
 
-            // Insert team information 
+            // Insert team information for past matches
             try {
                 for (const team of pastMatch.teamInfo) {
                     if (!team) {
-                        console.log('Team Info Is Not Present in API')
+                        console.log('Team Info Is Not Present in API');
                         continue;
                     }
                     const teamInfoData = {
                         name: team.name,
                         shortname: team.shortname,
                         img: team.img,
-                        match_id: match.id  
+                        match_id: match.id  // Ensure valid match ID
                     };
-                    await TeamInfo.create(teamInfoData);
+                    await TeamInfo.create(teamInfoData);  // Use create for better control
                 }
             } catch (error) {
-
+                console.error("Error inserting team info: ", error);
             }
 
-
-
-            // Insert score information 
+            // Insert score information for past matches
             for (const score of pastMatch.score) {
                 const scoreData = {
                     r: score.r,
                     w: score.w,
                     o: score.o,
                     inning: score.inning,
-                    match_id: match.id  
+                    match_id: match.id  // Ensure valid match ID
                 };
                 await Score.create(scoreData);
+            }
+        }
+
+        // Insert or upsert upcoming matches into the database
+        for (const upcomingMatch of upcomingMatches) {
+            const matchData = {
+                id: upcomingMatch.id,
+                name: upcomingMatch.name,
+                matchType: upcomingMatch.matchType,
+                status: upcomingMatch.status,
+                venue: upcomingMatch.venue,
+                date: upcomingMatch.date,
+                dateTimeGMT: upcomingMatch.dateTimeGMT,
+                teams: upcomingMatch.teams,
+                series_id: upcomingMatch.series_id,
+                fantasyEnabled: upcomingMatch.fantasyEnabled,
+                bbbEnabled: upcomingMatch.bbbEnabled,
+                hasSquad: upcomingMatch.hasSquad,
+                matchStarted: upcomingMatch.matchStarted,
+                matchEnded: upcomingMatch.matchEnded
+            };
+
+            // Upsert (insert or update) upcoming match data into 'UpcomingMatch' table
+            const [match, created] = await UpcomingMatch.upsert(matchData);
+
+            // Ensure the match is inserted before inserting related data
+            if (!match.id) {
+                console.error("Upcoming Match ID not found, skipping team info insertion.");
+                continue;
+            }
+
+            // Insert or update team information for upcoming matches
+            try {
+                for (const team of upcomingMatch.teamInfo) {  // Use teamInfo instead of teams
+                    if (!team) continue;
+
+                    const teamInfoData = {
+                        name: team.name,
+                        shortname: team.shortname,
+                        img: team.img,
+                        match_id: match.id  // Link team info to the match using match_id
+                    };
+
+                    // Upsert (insert or update) the team information in TeamInfo table
+                    await TeamInfo.upsert(teamInfoData);
+                }
+            } catch (error) {
+                console.error("Error inserting/updating team info for upcoming match: ", error);
             }
         }
 
