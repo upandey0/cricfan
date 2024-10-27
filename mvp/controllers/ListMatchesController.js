@@ -1,5 +1,9 @@
+const NodeCache = require('node-cache');
 const secrets = require('../config/data.json');
 const { Match, Team } = require('../models');
+
+// Cache instance with TTL of 3 minutes (180 seconds)
+const matchCache = new NodeCache({ stdTTL: 180 });
 
 const ListmatchesController = async (req, res) => {
     try {
@@ -13,10 +17,22 @@ const ListmatchesController = async (req, res) => {
             });
         }
 
-        // Calculate offset based on pageNumber
-        const offset = pageNumber - 1;
+        // Check if data is cached for this pageNumber
+        const cachedMatches = matchCache.get(`matches_page_${pageNumber}`);
 
-        // If no cached data, make API call
+        if (cachedMatches) {
+            // Cache hit, return cached data
+            return res.status(200).json({
+                success: true,
+                liveMatches: cachedMatches.liveMatches,
+                pastMatches: cachedMatches.pastMatches,
+                upcomingMatches: cachedMatches.upcomingMatches,
+                message: 'Data retrieved from cache'
+            });
+        }
+
+        // Cache miss, make API call
+        const offset = pageNumber - 1;
         const apiKey = secrets.API_KEY;
         const version = secrets.VERSION;
         const baseURL = secrets.BASE_URL;
@@ -40,29 +56,29 @@ const ListmatchesController = async (req, res) => {
         for (const data of toSendData) {
             if (data.matchStarted && !data.matchEnded) {
                 liveMatches.push(data);
-                // Insert live match with matchStatus 'live'
                 await insertMatchAndTeams(data, 'live');
             } else if (data.matchEnded) {
                 pastMatches.push(data);
-                // Insert past match with matchStatus 'completed'
                 await insertMatchAndTeams(data, 'completed');
             } else if (!data.matchStarted && !data.matchEnded) {
                 upcomingMatches.push(data);
-                // Insert upcoming match with matchStatus 'upcoming'
                 await insertMatchAndTeams(data, 'upcoming');
             }
         }
+
+        // Cache the result for this pageNumber with a TTL of 3 minutes
+        matchCache.set(`matches_page_${pageNumber}`, { liveMatches, pastMatches, upcomingMatches });
 
         // Send API response back to the client
         return res.status(200).json({
             success: true,
             liveMatches,
             pastMatches,
-            upcomingMatches
+            upcomingMatches,
+            message: 'Data retrieved from API'
         });
 
     } catch (error) {
-        // General error handling
         console.error("Error in ListmatchesController: ", error);
         return res.status(500).json({
             success: false,
@@ -75,10 +91,8 @@ const ListmatchesController = async (req, res) => {
 // Helper function to insert match and team info into the database
 const insertMatchAndTeams = async (matchData, matchStatus) => {
     try {
-        // Check if match already exists
         const existingMatch = await Match.findOne({ where: { id: matchData.id } });
         if (existingMatch) {
-            // Update match if it already exists
             await existingMatch.update({
                 matchStatus: matchStatus,
                 matchStarted: matchData.matchStarted,
@@ -89,7 +103,6 @@ const insertMatchAndTeams = async (matchData, matchStatus) => {
                 status: matchData.status,
             });
         } else {
-            // Insert new match into the Matches table
             const newMatch = await Match.create({
                 id: matchData.id,
                 name: matchData.name,
@@ -104,17 +117,16 @@ const insertMatchAndTeams = async (matchData, matchStatus) => {
                 hasSquad: matchData.hasSquad,
                 matchStarted: matchData.matchStarted,
                 matchEnded: matchData.matchEnded,
-                matchStatus: matchStatus // 'live', 'upcoming', or 'completed'
+                matchStatus: matchStatus 
             });
 
-            // Insert teams into Teams table for the newly inserted match
             for (const team of matchData.teamInfo) {
                 await Team.create({
-                    id: team.id, // Assuming team has an 'id', if not you can generate a UUID here
+                    id: team.id,
                     name: team.name,
                     shortname: team.shortname,
                     img: team.img,
-                    match_id: newMatch.id // Foreign key reference to Matches table
+                    match_id: newMatch.id
                 });
             }
         }

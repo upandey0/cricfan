@@ -66,6 +66,12 @@ module.exports = (sequelize, DataType) => {
             foreignKey: 'match_id',
             as: 'teams'
         });
+
+        // Add hasMany association with Contest
+        Matches.hasMany(models.Contest, {
+            foreignKey: 'match_id',
+            as: 'contests'
+        });
     };
 
     return Matches;
