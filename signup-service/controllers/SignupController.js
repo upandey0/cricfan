@@ -200,6 +200,74 @@ class SignupController extends BaseController {
     }
   }
 
+  static async signup(req, res) {
+    const { email, password, first_name, last_name } = req.body;
+
+    try {
+      const existingUser = await User.findOne({ where: { email } });
+      if (existingUser) {
+        return SignupController.handleError(res, new Error('Email already in use'), ERROR_CODES.EMAIL_ALREADY_IN_USE);
+      }
+
+      const referralCode = ReferralCodeGenerator.generateReferralCodeWithEmail(email);
+      const newUser = await User.create({
+        email,
+        password,
+        first_name,
+        last_name,
+        referral_code: referralCode,
+      });
+
+      const sessionId = await createSession(newUser, SESSION_ID_TTL);
+
+      const response = new BaseResponse(SUCCESS, {
+        sessionId,
+        user: {
+          id: newUser.id,
+          email: newUser.email,
+          first_name: newUser.first_name,
+          last_name: newUser.last_name,
+        },
+      });
+
+      res.status(201).json(response);
+    } catch (error) {
+      SignupController.handleError(res, error, ERROR_CODES.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  static async login(req, res) {
+    const { email, password } = req.body;
+
+    try {
+      const user = await User.findOne({ where: { email } });
+      if (!user) {
+        return SignupController.handleError(res, new Error('Invalid email or password , no user exist with this email'), ERROR_CODES.INVALID_CREDENTIALS);
+      }
+      
+      const isValid = await user.validPassword(password);
+      if (!isValid) {
+        return SignupController.handleError(res, new Error('Invalid password'), ERROR_CODES.INVALID_CREDENTIALS);
+      }
+
+      const sessionId = await createSession(user, SESSION_ID_TTL);
+
+      const response = new BaseResponse(SUCCESS, {
+        sessionId,
+        user: {
+          id: user.id,
+          email: user.email,
+          first_name: user.first_name,
+          last_name: user.last_name,
+        },
+      });
+
+      res.status(200).json(response);
+    } catch (error) {
+      SignupController.handleError(res, error, ERROR_CODES.INTERNAL_SERVER_ERROR);
+    }
+  }
+
   // Helper Methods
   static async addReferralMapping(phoneNumber) {
     const referralKey = `REFERRAL_${phoneNumber}`;

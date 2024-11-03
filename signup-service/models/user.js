@@ -1,5 +1,7 @@
 'use strict';
 
+const bcrypt = require('bcrypt');
+
 module.exports = (sequelize, DataTypes) => {
   const User = sequelize.define(
     'User',
@@ -14,20 +16,26 @@ module.exports = (sequelize, DataTypes) => {
       phone: {
         type: DataTypes.STRING(255), // Changed to match SQL definition
         unique: true,
-        allowNull: false,
+        allowNull: true,
         validate: {
           isValidPhone(value) {
             // Basic validation for phone numbers
+            if(value) {
             if (!/^\+?[1-9]\d{1,14}$/.test(value)) {
               throw new Error('Invalid phone number format');
             }
+          }
           },
         },
       },
       email: {
-        type: DataTypes.STRING(15),
+        type: DataTypes.STRING(255),
         allowNull: true,
         unique: false,
+      },
+      password: {
+        type: DataTypes.STRING(1024),
+        allowNull: true,
       },
       last_name: {
         type: DataTypes.STRING(255),
@@ -46,21 +54,32 @@ module.exports = (sequelize, DataTypes) => {
     {
       tableName: 'users',
       timestamps: true,
-
-      indexes: [
-        {
-          unique: true,
-          fields: ['referral_code'],
+      hooks: {
+        beforeCreate: async (user) => {
+          if (user.password) {
+            const salt = await bcrypt.genSalt(10);
+            user.password = await bcrypt.hash(user.password, salt);
+          }
         },
-        {
-          fields: ['createdAt'],
+        beforeUpdate: async (user) => {
+          if (user.password) {
+            const salt = await bcrypt.genSalt(10);
+            user.password = await bcrypt.hash(user.password, salt);
+          }
         },
-        {
-          unique: true,
-          fields: ['phone'],
-        },
-      ],
+      },
     }
   );
+
+  User.prototype.validPassword = async function (password) {
+    console.log('password', this.password);
+    const user = this;
+    const isMatch = await bcrypt.compare(password, user.password); 
+    if (!isMatch) {
+        throw new Error('Invalid password');
+    }
+    return isMatch;
+  };
+
   return User;
 };
